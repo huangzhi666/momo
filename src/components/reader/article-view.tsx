@@ -349,7 +349,7 @@ export function ArticleView({ articleId }: { articleId: string }) {
               再生成
             </Button>
           ) : null}
-          {article.kind === 'imported' && article.audio.ready < article.sentenceCount ? (
+          {article.audio.ready < article.sentenceCount ? (
             <Button
               size="sm"
               variant="outline"
@@ -357,7 +357,11 @@ export function ArticleView({ articleId }: { articleId: string }) {
               disabled={ttsStarting}
             >
               {ttsStarting ? <Loader2 className="animate-spin" /> : <AudioLines />}
-              {article.audio.ready > 0 ? '继续合成音频' : '生成跟读音频'}
+              {article.kind === 'imported'
+                ? article.audio.ready > 0
+                  ? '继续合成音频'
+                  : '生成跟读音频'
+                : '继续合成音频'}
             </Button>
           ) : null}
         </div>

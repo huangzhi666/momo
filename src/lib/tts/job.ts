@@ -255,25 +255,14 @@ async function runArticleTts(
 
 /** 种子脚本用：等待整篇音频生成完。 */
 export async function prepareArticleAudio(articleId: string, voice: string): Promise<TtsJobState> {
-  const key = keyOf(articleId, voice)
-  let entry = jobs.get(key)
-  if (entry?.state.status === 'running' && entry.lock) {
-    return new Promise((resolve) => {
-      const unsubscribe = subscribeTts(articleId, voice, (state) => {
-        if (state.status !== 'running') {
-          unsubscribe()
-          resolve(state)
-        }
-      })
-    })
-  }
   startArticleTts(articleId, voice)
   return new Promise((resolve) => {
     let settled = false
-    const unsubscribe = subscribeTts(articleId, voice, (state) => {
+    let unsubscribe: (() => void) | null = null
+    unsubscribe = subscribeTts(articleId, voice, (state) => {
       if (state.status !== 'running' && !settled) {
         settled = true
-        unsubscribe()
+        unsubscribe?.()
         resolve(state)
       }
     })
