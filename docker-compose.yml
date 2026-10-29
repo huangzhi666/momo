@@ -1,0 +1,25 @@
+services:
+  lexiloop:
+    build: .
+    image: lexiloop:local
+    container_name: lexiloop
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      NODE_ENV: production
+      # Docker 内没有 Windows SAPI；请配置 Azure / ElevenLabs / OpenAI TTS，
+      # 否则使用静音占位音轨。
+      TTS_PROVIDER: ${TTS_PROVIDER:-}
+      MAIMEMO_API_TOKEN: ${MAIMEMO_API_TOKEN:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      AZURE_SPEECH_KEY: ${AZURE_SPEECH_KEY:-}
+      AZURE_SPEECH_REGION: ${AZURE_SPEECH_REGION:-eastus}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      OPENAI_TTS_API_KEY: ${OPENAI_TTS_API_KEY:-}
+    volumes:
+      # 复用宿主机的 data/：basic、demo、SQLite、音频都在这里。
+      # 第一次使用前请在宿主机运行 pnpm setup。
+      - ./data:/app/data
+    restart: unless-stopped

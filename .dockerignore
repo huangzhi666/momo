@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.tmp
+.pnpm-store
+test-results
+playwright-report
+data/raw
+data/audio
+data/lexiloop.db
+data/lexiloop.db-shm
+data/lexiloop.db-wal
+.env
+.env.local
+.env.*.local
+*.log

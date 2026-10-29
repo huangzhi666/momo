@@ -1,0 +1,34 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.pnpm-store/
+.tmp/
+
+# 本地环境与密钥
+.env
+.env.*
+!.env.example
+
+# 本地数据（词库、ECDICT 原始数据、数据库、音频）
+data/raw/
+data/tmp/
+data/lexiloop.db
+data/lexiloop.db-journal
+data/lexiloop.db-wal
+data/lexiloop.db-shm
+data/audio/
+
+# 系统
+.DS_Store
+Thumbs.db
+*.log
+
+# Next / TS
+next-env.d.ts
+tsconfig.tsbuildinfo
