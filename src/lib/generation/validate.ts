@@ -116,12 +116,12 @@ export function validateArticle(input: ValidateInput): ValidationResult {
   })
 
   checks.push({
-    key: 'target_lower',
-    label: '生词不过少（参考）',
+    key: 'new_count_lower',
+    label: `生词数 ≥ 目标 - 3`,
     ok: metrics.newCount >= Math.max(0, newTarget - 3),
     actual: `${metrics.newCount}`,
     expected: `≥${Math.max(0, newTarget - 3)}`,
-    blocking: false,
+    blocking: true,
   })
 
   const noCjk = !containsCjk(text)
@@ -175,7 +175,12 @@ export function validateArticle(input: ValidateInput): ValidationResult {
     (target) => !metrics.targetUsed.some((used) => used.toLowerCase() === target.toLowerCase()),
   )
   const otherIssues = blocking
-    .filter((check) => !['new_count', 'new_density', 'out_of_band', 'target_coverage'].includes(check.key))
+    .filter(
+      (check) =>
+        !['new_count', 'new_count_lower', 'new_density', 'out_of_band', 'target_coverage'].includes(
+          check.key,
+        ),
+    )
     .map((check) => check.label)
 
   return {

@@ -9,7 +9,15 @@ export interface GenerationPromptInput {
   topic: string
   genre: Genre
   targets: TargetWord[]
+  newWordCandidates: TargetWord[]
   supplement: string
+}
+
+function candidateLines(candidates: TargetWord[]): string {
+  if (candidates.length === 0) return '(none available; use common level-appropriate words cautiously)'
+  return candidates
+    .map((word, index) => `${index + 1}. ${word.lemma}${word.gloss ? ` — ${word.gloss}` : ''}`)
+    .join('\n')
 }
 
 function targetLines(targets: TargetWord[]): string {
@@ -47,8 +55,15 @@ The learner knows Oxford 3000 (A1–B2) and about 3,700 words selected in a voca
 TARGET WORDS (use at least 60% of them, naturally; do not force awkward collocations)
 ${targetLines(input.targets)}
 
+IMPORTANT ABOUT TARGET WORDS
+These words are already in the learner's selected vocabulary. They are reinforcement words, NOT new words, and they do NOT count toward the new-word budget.
+
 NEW-WORD BUDGET
-Use only common, useful English. Apart from the target words, the learner should meet about ${input.newTarget} genuinely new content words. Do not use rare literary words, idioms that need cultural knowledge, or long noun compounds. At most 4 words may be outside the learner's level band.
+Apart from the target words, the learner must meet about ${input.newTarget} genuinely new content words (at least ${Math.max(0, input.newTarget - 3)}, at most ${input.newTarget + 3}). These must be different lemmas from the target list and must not be everyday Oxford 3000 filler. Use only common, useful English; do not use rare literary words, idioms that need cultural knowledge, or long noun compounds. At most 4 words may be outside the learner's level band.
+
+SUGGESTED NEW WORDS (outside Oxford 3000 and outside the learner's selected vocabulary)
+Use at least ${Math.max(0, input.newTarget - 3)} and at most ${input.newTarget + 3} of these words, naturally, as the article's new words. Do not replace them with easier synonyms in every case; the learner needs to meet them.
+${candidateLines(input.newWordCandidates)}
 
 HARD RULES (must all hold)
 1. English only in the article. No Chinese characters anywhere in title or sentences. (summary_zh is the only Chinese field.)
@@ -88,8 +103,8 @@ The "genre" must be "${input.genre}". Do not add any other keys or commentary.`
 Topic: ${input.topic}
 Genre: ${input.genre}
 Length: ${input.length} words
-New-word budget: ${input.newTarget} distinct words
-Target words: ${input.targets.map((t) => t.lemma).join(', ') || '(none)'}
+New-word budget: ${input.newTarget} distinct new words, NOT counting the target words
+Target words (already known; do not count as new words): ${input.targets.map((t) => t.lemma).join(', ') || '(none)'}
 ${supplement ? `Extra requirements: ${supplement}` : ''}
 
 Remember: JSON only. No text before or after it.`
@@ -125,10 +140,11 @@ REVISION TASK
 You are revising your previous article because deterministic checks failed. Keep the parts that work, but fix every listed problem. Replace the whole JSON object. Do not explain. Do not add keys.
 
 Fix only what is necessary:
-- Reduce the number of distinct new words to the budget, or replace them with common words.
+- If there are too many distinct new words, reduce them to the budget or replace them with common words.
+- If there are too few distinct new words, ADD natural new content words. Target words do not count toward the new-word budget.
 - Replace out-of-band words with words the learner is more likely to know.
 - Use the missing target words naturally.
-- Remove any Chinese, Markdown, parentheses, names, or statistics.
+- Remove any Chinese, Markdown, parentheses, names, abbreviations with dots, or statistics.
 - Keep the same genre and approximate length.`,
     prompt: `PREVIOUS ARTICLE (JSON):
 ${JSON.stringify(input.previous)}

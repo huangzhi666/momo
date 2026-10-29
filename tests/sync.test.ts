@@ -40,7 +40,8 @@ function fakeClient(options: { failQueryAt?: number } = {}): Pick<
 > {
   let queries = 0
   return {
-    async countStudyRecords(start: Date, end: Date) {
+    async countStudyRecords(start?: Date, end?: Date) {
+      if (!start || !end) return records.length
       return records.filter((record) => inWindow(record, start, end)).length
     },
     async queryStudyRecords(start: Date, end: Date, limit = 1000) {
@@ -75,8 +76,10 @@ describe('runVocabSync — time-window algorithm', () => {
       missing: number
       unique: number
       requests: number
+      planTotal?: number
     }
     expect(summary.unique).toBe(TOTAL)
+    expect(summary.planTotal).toBe(TOTAL)
     expect(summary.missing).toBe(0)
     expect(fs.existsSync(file)).toBe(false)
   })

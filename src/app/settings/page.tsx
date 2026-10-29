@@ -245,11 +245,12 @@ export default function SettingsPage() {
 
   const additions = additionsData?.additions ?? []
   const failedCount = additions.filter((item) => item.status === 'failed').length
-  const syncPercent = sync?.totalReported
-    ? Math.min(100, Math.round((sync.found / sync.totalReported) * 100))
-    : sync?.phase === 'done'
+  const syncPercent =
+    sync?.phase === 'done'
       ? 100
-      : 0
+      : sync?.totalReported
+        ? Math.min(100, Math.round((sync.found / sync.totalReported) * 100))
+        : 0
 
   return (
     <div className="space-y-6">

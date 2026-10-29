@@ -114,6 +114,12 @@ describe('classifyWord — Oxford first', () => {
     expect(classifyWord({ surface: 'I', sentenceInitial: false }, deps()).status).toBe('basic')
   })
 
+  it('ignores dotted abbreviations', () => {
+    expect(classifyWord({ surface: 'a.m', sentenceInitial: false }, deps()).status).toBe('ignored')
+    expect(classifyWord({ surface: 'e.g', sentenceInitial: false }, deps()).status).toBe('ignored')
+    expect(classifyWord({ surface: 'etc', sentenceInitial: false }, deps()).status).toBe('ignored')
+  })
+
   it('respects Oxford mode off', () => {
     const off = deps({ oxfordMode: 'off' })
     expect(classifyWord({ surface: 'abandon', sentenceInitial: false }, off).status).toBe('new')

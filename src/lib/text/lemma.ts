@@ -219,6 +219,11 @@ function hasAnyPos(pos: string | null): boolean {
   return posTokens(pos).length > 0
 }
 
+/** 只查自有属性，避免 "constructor"/"toString" 命中 Object.prototype。 */
+function contractionOf(word: string): string | undefined {
+  return Object.hasOwn(CONTRACTIONS, word) ? CONTRACTIONS[word] : undefined
+}
+
 /**
  * 屈折还原候选（不含派生）。顺序即优先级。
  * 只生成候选，是否接受由 exists / POS 校验决定。
@@ -308,13 +313,14 @@ export function resolveLemmaWith(surface: string, deps: LemmaDeps): string {
   let word = normalizeSurface(surface)
   if (!word) return word
 
-  const contraction = CONTRACTIONS[word]
+  const contraction = contractionOf(word)
   if (contraction) return contraction
 
   const stripped = stripPossessive(word)
   if (stripped !== word) {
     word = stripped
-    if (CONTRACTIONS[word]) return CONTRACTIONS[word]
+    const strippedContraction = contractionOf(word)
+    if (strippedContraction) return strippedContraction
   }
 
   const irregular = getIrregularLemma(word)
@@ -361,7 +367,7 @@ export function resolveLemmaWith(surface: string, deps: LemmaDeps): string {
 export function lemmaCandidates(surface: string, resolved: string): string[] {
   const normalized = normalizeSurface(surface)
   const stripped = stripPossessive(normalized)
-  const bases = [resolved, stripped, normalized, CONTRACTIONS[normalized] ?? ''].filter(Boolean)
+  const bases = [resolved, stripped, normalized, contractionOf(normalized) ?? ''].filter(Boolean)
   const all = new Set<string>()
   for (const base of bases) {
     all.add(base)

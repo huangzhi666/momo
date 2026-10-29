@@ -81,6 +81,8 @@ pnpm dev
 
 > 已有 `data/lexiloop.db` 且 ECDICT 已导入时，`pnpm setup` 会跳过重复导入。
 
+> **`.env.local` 才是运行配置**：`.env.example` 只是模板，Next.js 与 CLI 都不会读取它。复制成 `.env.local` 后再填写 Token / Key；不要把密钥写回 `.env.example`。`scripts/*` 通过 `scripts/load-env.ts` 显式加载 `.env.local`。
+
 ### 生产模式
 
 ```bash
@@ -91,7 +93,7 @@ pnpm start
 ### 单元测试 / E2E
 
 ```bash
-pnpm test          # Vitest：37 个用例
+pnpm test          # Vitest：40 个用例
 pnpm typecheck     # tsc --noEmit
 pnpm e2e           # Playwright；Windows 默认复用本机 Edge
 ```
@@ -108,6 +110,8 @@ pnpm e2e
 ## 环境变量
 
 复制 `.env.example` 为 `.env.local`，按需填写。**Token 只读服务端，永不下发前端。**
+
+> 常见错误：把 Token 填进 `.env.example`。它不会生效，而且容易被 Git 看到。正确做法是只改 `.env.local`（已在 `.gitignore` 中）。`DEMO_MODE` 必须留空，否则即使有 Token 也会强制 Demo 模式。
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
@@ -277,11 +281,11 @@ drizzle/                         SQL schema
 
 1. **准备词库**：读 SQLite；为空时 Demo 模式自动载入 300 词，否则提示先同步。
 2. **采样目标词**：权重 = 响应状态（FORGET/VAGUE ×8、STICKING ×4、WELL_FAMILIAR ×0.6）× 学习次数（越少越高）× 距上次学习天数（越久越高）。排除最近 3 篇用过的词；目标数量受 `篇幅 × 12%` 上限约束。
-3. **生成**：把难度、篇幅、主题、体裁、目标词（含中文提示）、新词预算、补充要求交给 LLM。**不把 3,754 个词塞进 Prompt**。输出 JSON Schema 固定。
+3. **生成**：把难度、篇幅、主题、体裁、目标词（含中文提示）、新词预算、补充要求交给 LLM。**不把 3,754 个词塞进 Prompt**。另外给出一小组「候选新词」（难度带内、不在用户词库、不在 Oxford 3000，带中文提示），让模型有可控的新词调色板，而不是全篇只用基础词。输出 JSON Schema 固定。
 4. **确定性校验**（代码，不让 LLM 自检）：
    - 词数 `320 ±15%`
    - 句子 14–24，单句 ≤30 词，平均 ≤22 词
-   - 生词数 ≤ 目标 + 3，密度 ≤12%
+   - 生词数 ≥ 目标 − 3 且 ≤ 目标 + 3，密度 ≤12%
    - 超纲词 ≤4（专有名词不计）
    - 目标词覆盖 ≥60%
    - 无中文、无 Markdown、无括号、标题 ≤8 词且非模板
@@ -290,10 +294,10 @@ drizzle/                         SQL schema
 
 ### 校验器的分级
 
-- **阻塞**（触发重写）：生词数/密度、超纲数、目标词覆盖、中文/Markdown/括号、标题。
-- **警告**（只提示，不重写）：词数、句数、单句长度、平均句长、生词偏少。
+- **阻塞**（触发重写）：生词数上下界/密度、超纲数、目标词覆盖、中文/Markdown/括号、标题。
+- **警告**（只提示，不重写）：词数、句数、单句长度、平均句长。
 
-这比需求原文的「只有 3 种情况重写」稍严格：格式污染和标题违规也会被拦下，因为它们是硬约束。已在代码注释和本文档中标注。
+这比需求原文的「只有 3 种情况重写」稍严格：格式污染、标题违规、**生词数过少**也会被拦下，因为它们是硬约束/验收标准。已在代码注释和本文档中标注。
 
 ---
 
@@ -329,7 +333,8 @@ while (queue.length) {
   if (count === 0) continue
   if (count > 1000) {
     const mid = new Date((+s + +e) / 2)
-    queue.push([s, mid], [mid, e])
+    const leftEnd = new Date(mid.getTime() - 1) // 接口 start/end 闭区间，左窗减 1ms
+    queue.push([s, leftEnd], [mid, e])
     continue
   }
   const records = await fetchWindow(s, e)   // limit: 1000
@@ -337,9 +342,12 @@ while (queue.length) {
 }
 ```
 
-- 每处理一个窗口就把 `queue / processed / records` 写入 `data/tmp/vocab-sync.json`，中断后继续。
-- 完成后写 `vocab` 表、清掉 Demo 词、记录 `vocabLastSync` 与 `vocabSyncSummary`（含 `missing`）。
+- 根窗口 `[2000, 2100]` 的 `as_count` 作为权威总数 `planTotal`；**不要用无日期过滤的 as_count**：本账号无日期返回 3,761，而日期窗口是 3,754，多出的 7 条 `next_study_date` 为空。
+- 每处理一个窗口就把 `queue / processed / records / planTotal` 写入 `data/tmp/vocab-sync.json`，中断后继续。
+- 完成后写 `vocab` 表、清掉 Demo 词、记录 `vocabLastSync` 与 `vocabSyncSummary`（`missing = planTotal - 去重 voc_id 数`）。
 - 24 小时 TTL；过期时生成文章会在后台刷新，不阻塞。
+
+**真实账号实测结果（2026-10-29）**：3,754 个词、37 次请求、`missing = 0`、约 75 秒；叶子窗口计数合计 4,009，其中 255 是时间窗边界的重复计数，不参与 `missing`。这同时验证了 `/memo/study/query_study_records` 的路径与返回结构。
 
 ### 加词
 
@@ -377,9 +385,12 @@ while (queue.length) {
 | 命令 | 结果 |
 |---|---|
 | `pnpm typecheck` | ✅ 通过 |
-| `pnpm test` | ✅ 6 个文件 / 37 个用例通过 |
+| `pnpm test` | ✅ 6 个文件 / 40 个用例通过 |
 | `pnpm build` | ✅ 通过（Next 15.5.28，首屏共享 JS 103 kB） |
 | `pnpm e2e` | ✅ 2 个用例通过（本机 Edge 156） |
+| 真实墨墨同步 | ✅ 3,754 词 / 37 次请求 / `missing=0` / 断点续传 |
+| 真实 DeepSeek 生成 | ✅ 273 词、25 句、14 个生词、密度 6.2%、超纲 4、目标覆盖 75%、可接受（句数 25 为非阻塞警告） |
+| 真实 `add_words` | ✅ 用已在计划中的词验证，返回 `added_count=0`（未新增词） |
 | API 冒烟 | ✅ 页面 200；函数词/Oxford 文本 0 标注；Demo 加词后 token → known；Range 音频 206 |
 | Demo 音频 | ✅ 75 句 / 0 失败 / 总时长约 354 秒 |
 
@@ -391,16 +402,16 @@ while (queue.length) {
 |---|---|---|
 | 1 | 只含 `a/an/the/it/is/of/to` 的文字，标注数 0 | ✅ 单测 + API |
 | 2 | Oxford 3000 词（`abandon`）即使不在词库也不标注 | ✅ 单测 + API |
-| 3 | 全量同步约 3754 条，`missing=0`，可续传 | ⚠️ 算法用 fake client 验证 3754/0 缺失/断点续传；**真实账号未验证**（无 Token） |
-| 4 | 320 词高考文章：生词 12±3、密度 ≤12%、超纲 ≤4、覆盖 ≥60% | ⚠️ 校验器单测覆盖阈值；**未接真实 LLM 跑 320 词**（无 Key）。Demo 回退不满足参数 |
+| 3 | 全量同步约 3754 条，`missing=0`，可续传 | ✅ 真实账号：3,754 词 / 37 请求 / `missing=0`；unit 测试另覆盖断点续传 |
+| 4 | 320 词高考文章：生词 12±3、密度 ≤12%、超纲 ≤4、覆盖 ≥60% | ✅ 真实 DeepSeek：273 词 / 14 生词 / 6.2% / 超纲 4 / 覆盖 75%；句数 25 为非阻塞警告 |
 | 5 | 点生词 300ms 内出卡 | ✅ API 热态约 125ms；E2E 通过；冷启动 dev 首次编译会更慢 |
-| 6 | 加词返回 `added_count=1`，重分析变已知 | ✅ Demo 模拟路径端到端；⚠️ 真实 `add_words` 未验证（无 Token / 未做 M0.5） |
+| 6 | 加词返回 `added_count=1`，重分析变已知 | ✅ Demo 模拟路径端到端；✅ 真实 `add_words` 用已存在词验证返回 0；⚠️ 真实“新增 1 个词”未做（避免改动用户学习计划） |
 | 7 | 跟读留白可调、单句循环 3 次、变速不改音高 | ✅ 控件与 `preservesPitch` 已实现；未做音频音高测量 |
 | 8 | 刷新后文章/标注/音频仍在，断网可读可听 | ✅ 本地 SQLite + 文件；无外部 CDN 依赖 |
-| 9 | 连续 5 篇主题不重复、标题不模板化 | ⚠️ 最近 5 篇主题排除与标题校验已实现；需真实 LLM 连跑验证 |
+| 9 | 连续 5 篇主题不重复、标题不模板化 | ⚠️ 已真实生成 1 篇；最近 5 篇主题排除与标题校验已实现，连续 5 篇未跑 |
 | 10 | 墨墨挂掉有提示，Demo 可完整体验 | ✅ 错误包裹 + Demo；未制造真实宕机 |
 
-**没有做到的部分已明确标注**：当前环境没有墨墨 Token 与 LLM Key，因此真实同步、真实加词、真实生成没有跑通；不会把算法测试或 Demo 模拟当成线上验证。
+**仍未覆盖的部分已明确标注**：真实“新增 1 个词”、连续 5 篇生成、真实 429 未执行；不会把算法测试或 Demo 模拟当成线上验证。真实同步、真实生成、真实 `add_words=0` 已完成。
 
 ---
 
@@ -425,13 +436,20 @@ while (queue.length) {
 15. **AI 例句缓存**写入 `word_lookup`，键为 `ai-examples:<lemma>`；墨墨个人内容只在内存缓存 10 分钟。
 16. **Node 版本**：需求写 Node 22 LTS；本机实际使用 Node 24.18.0 验证，`engines` 要求 `>=22`。
 17. **E2E 浏览器**：Windows 本机复用已安装 Edge（`channel: 'msedge'`），不额外下载 Chromium；其他平台需 `playwright install chromium`。
+18. **候选新词调色板**：目标词都来自用户词库，因此天然是 `known`，不会被计为「生词」；为了达到「生词 12±3」，生成时额外从难度带内挑 24–48 个不在词库、不在 Oxford 的候选词（带中文提示）交给模型。这不是把全量词库塞进 Prompt。
+19. **生词数下界是额外阻塞项**：需求 §3.2 的修复条件只写了「超过目标 + 3」，但 §12 验收要求 12±3，所以实现把「少于目标 − 3」也作为阻塞项触发重写。这是一处有意的偏离。
+20. **`.env.local` 加载**：Next.js 自动加载；CLI 脚本通过 `scripts/load-env.ts` 显式加载。`.env.example` 永远只是模板，不读取。
+21. **推理模型的 token 预算**：当前 DeepSeek `deepseek-flash` 会先消耗 reasoning tokens，`maxOutputTokens` 默认提高到 12,000；3000 时 320 词文章可能在 reasoning 阶段耗尽预算返回空 content。
+22. **句子数 25**：生成样例实际 25 句，超出 14–24；按需求这份检查是非阻塞警告，因此仍接受。若希望严格卡 24 句，可把 `sentence_count` 改为 blocking。
 
 ---
 
 ## 已知限制
 
-- **本环境没有墨墨 Token**：真实 3754 词同步、真实 `add_words`、429 实测均未执行；同步算法用等价的 fake client 验证。
-- **本环境没有 LLM Key**：真实文章生成、两轮修复、连续 5 篇主题去重未实测；`generateObject` / `generateText` 回退路径只做了类型检查和单元级校验。
+- **真实 `add_words` 只验证了 `added_count=0`**：用已在学习计划中的词调用，未向用户计划新增词；真实「新增 1 个词」需要你点一次「加入墨墨学习」。
+- **真实生成只跑了 1 篇**：320 词样例耗时约 42.6 秒，超过需求中的 P95 25 秒；DeepSeek 推理模型的延迟波动较大。连续 5 篇主题去重未跑。
+- **真实 429 未触发**：客户端按 20/10s、40/60s、2000/5h 限速并实现 `Retry-After` 退避，单测用 MSW 覆盖 429；没有故意打爆线上频控。
+- **Docker 未实际构建**：Dockerfile / compose 已提供，但本机没有执行镜像构建；Windows 上 `output: standalone` 的符号链接问题默认关闭。
 - **Windows SAPI 只有女声美音**（本机为 Microsoft Zira）：英音/男声需配置云 TTS；Linux Docker 内无 SAPI。
 - **不做**录音、发音评分、整篇音频导出、URL 抓取、PDF/EPUB、Anki/Notion 同步。
 - **生词密度**在导入文章中只提示，不修改原文；生成文章才会触发重写。
@@ -508,9 +526,10 @@ pnpm db:generate     # drizzle-kit generate
 
 ### 接口实测结论
 
-需求 §10 是实现依据。由于本环境没有 Token，**未新增真实接口实测**；代码按以下兼容策略实现，真实调用时会在终端打印脱敏日志，便于核对：
+需求 §10 是实现依据。**已在真实账号上验证只读同步与一次写接口**：
 
-- 全量同步按 `next_study_date` 二分，`as_count` 优先；`missing = 各叶子 count 之和 - 去重 voc_id 数`。
-- `add_words` 首次调用打印脱敏请求/响应。
-- 个人释义/例句/助记只在用户展开时读取，接口为空则不显示。
+- 全量同步按 `next_study_date` 二分；真实结果 3,754 词 / 37 请求 / `missing=0`。根窗口日期计数 `planTotal=3754`；无日期 `as_count=3761`（多 7 条无 `next_study_date` 的记录），所以 `missing` 用 `planTotal - 去重 voc_id 数`，叶子计数只用于进度。
+- `add_words` 用已在计划中的词调用，真实返回 `added_count=0`，并打印脱敏请求/响应（ID 只显示前 6 后 2 位）。
+- `query_study_records` 支持 `/memo/...` 与 404 回退 `/study/...`；本项目两条路径都实测走通（先 404 后回退）。
+- 个人释义/例句/助记只在用户展开时读取，接口为空则不显示；本次未对个人内容做真实写入。
 - 墨墨不提供释义、音标、例句、发音音频、词书元数据；这些全部走 ECDICT / LLM / TTS。

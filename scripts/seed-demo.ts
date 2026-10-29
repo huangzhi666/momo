@@ -1,4 +1,5 @@
 /* eslint-disable no-console */
+import './load-env'
 import { getEcdictCount } from '../src/lib/dict/ecdict'
 import { seedDemoContent } from '../src/lib/demo/seed'
 import { getVocabCount } from '../src/lib/db/queries'

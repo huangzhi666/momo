@@ -24,6 +24,7 @@ import {
   pickTopic,
   recentTargetLemmas,
   recentTopicList,
+  selectNewWordCandidates,
   selectTargets,
   type TargetWord,
 } from './targets'
@@ -213,6 +214,19 @@ export async function generateArticle(input: GenerateArticleInput): Promise<Gene
   const genre = input.genre && input.genre !== 'random' ? input.genre : pickGenre(random)
   const voice = input.voice || getDefaultVoice()
 
+  const newWordCandidates = selectNewWordCandidates({
+    level: input.level,
+    count: Math.min(48, Math.max(18, newWords * 2)),
+    excludeLemmas: [...targets.map((target) => target.lemma), ...excludeTargets],
+    vocabLemmas: new Set(vocab.map((record) => record.lemma)),
+    random,
+  })
+  if (newWordCandidates.length < Math.max(0, newWords - 3)) {
+    warnings.push(
+      `当前难度带内可用的新词不足（${newWordCandidates.length} 个），本次生词数可能偏少。`,
+    )
+  }
+
   const messages = buildGenerationMessages({
     level: input.level,
     length,
@@ -220,6 +234,7 @@ export async function generateArticle(input: GenerateArticleInput): Promise<Gene
     topic,
     genre,
     targets,
+    newWordCandidates,
     supplement,
   })
 

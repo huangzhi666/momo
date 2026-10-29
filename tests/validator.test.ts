@@ -62,6 +62,15 @@ describe('validateArticle', () => {
     expect(result.blocking.map((check) => check.key)).toContain('out_of_band')
   })
 
+  it('blocks too few new words', () => {
+    const result = validateArticle({
+      ...base,
+      metrics: metrics({ newCount: 4, newTokenCount: 5, newDensity: 5 / 320 }),
+    })
+    expect(result.acceptable).toBe(false)
+    expect(result.blocking.map((check) => check.key)).toContain('new_count_lower')
+  })
+
   it('blocks low target coverage', () => {
     const result = validateArticle({
       ...base,

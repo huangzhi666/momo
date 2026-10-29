@@ -1,8 +1,15 @@
 import type { Genre, Level } from '@/lib/constants'
 import { GENRE_META, GENRES, NEW_WORD_DENSITY_CAP, TOPIC_POOL } from '@/lib/constants'
+import { getRawDb } from '@/lib/db'
 import type { VocabRecord } from '@/lib/db/queries'
 import { getEcdictEntry, getEntryTags } from '@/lib/dict/ecdict'
-import { isFunctionWord } from '@/lib/dict/basic'
+import {
+  getOxfordLevel,
+  isFunctionWord,
+  isProperNounWord,
+  spellingVariants,
+} from '@/lib/dict/basic'
+import { resolveLemma } from '@/lib/dict/lemma'
 import { splitSenses } from '@/lib/utils'
 
 export interface TargetWord {
@@ -84,6 +91,98 @@ export function selectTargets(
     remaining.splice(index, 1)
   }
   return picked
+}
+
+/**
+ * 从难度带内挑一批「用户词库之外、Oxford 之外」的候选新词给 LLM 做提示。
+ * 这不是把词典塞进 Prompt，而是给模型一个可控的新词调色板，
+ * 避免它整篇只用基础词，导致确定性校验的「生词数 ≥ 目标 - 3」永远不达标。
+ */
+const SENSITIVE_OR_PROPER = new Set([
+  'american',
+  'british',
+  'african',
+  'chinese',
+  'christmas',
+  'european',
+  'christian',
+  'catholic',
+  'french',
+  'indian',
+  'russian',
+  'japanese',
+  'german',
+  'english',
+  'jewish',
+  'muslim',
+  'islamic',
+  'soviet',
+  'republican',
+  'democratic',
+  'socialist',
+  'republic',
+  'bible',
+  'jesus',
+  'god',
+  'war',
+  'warfare',
+  'invasion',
+  'raid',
+  'weapon',
+  'gun',
+  'rifle',
+  'bomb',
+])
+
+export function selectNewWordCandidates(options: {
+  level: Level
+  count: number
+  excludeLemmas?: string[]
+  vocabLemmas?: Set<string>
+  random?: () => number
+}): TargetWord[] {
+  const vocab = options.vocabLemmas ?? new Set<string>()
+  const excluded = new Set((options.excludeLemmas ?? []).map((word) => word.toLowerCase()))
+  const random = options.random ?? Math.random
+  const rows = getRawDb()
+    .prepare(
+      `SELECT word, translation FROM ecdict
+       WHERE oxford = 0 AND frq > 0
+         AND length(word) BETWEEN 4 AND 12
+         AND word GLOB '[a-z]*' AND word NOT GLOB '*[^a-z]*'
+       ORDER BY frq ASC
+       LIMIT 8000`,
+    )
+    .all() as { word: string; translation: string | null }[]
+
+  const pool: TargetWord[] = []
+  for (const row of rows) {
+    const word = row.word.toLowerCase()
+    if (excluded.has(word) || vocab.has(word)) continue
+    if (SENSITIVE_OR_PROPER.has(word)) continue
+    if (!row.translation) continue
+    if (!inBand(word, options.level)) continue
+    if (isFunctionWord(word) || isProperNounWord(word)) continue
+    const variants = [word, ...spellingVariants(word)]
+    if (variants.some((variant) => getOxfordLevel(variant))) continue
+    const entry = getEcdictEntry(word)
+    if ((entry?.oxford ?? 0) > 0) continue
+    const lemma = resolveLemma(word)
+    // 只把原形放进候选，避免让模型刻意使用 abandoned / studies 这类屈折形。
+    if (lemma !== word) continue
+    if (vocab.has(lemma) || getOxfordLevel(lemma)) continue
+    const gloss = splitSenses(row.translation)[0]?.replace(/^[a-z]+\.\s*/i, '') ?? ''
+    pool.push({ lemma: word, spelling: word, gloss: gloss.slice(0, 36), weight: 1 })
+    if (pool.length >= 800) break
+  }
+
+  // 在词频较高的一段里随机抽取，避免总是同一批词。
+  const shortlist = pool.slice(0, Math.min(pool.length, Math.max(options.count * 12, 120)))
+  for (let i = shortlist.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(random() * (i + 1))
+    ;[shortlist[i], shortlist[j]] = [shortlist[j], shortlist[i]]
+  }
+  return shortlist.slice(0, options.count)
 }
 
 export function recentTopicList(

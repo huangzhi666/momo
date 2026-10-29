@@ -33,6 +33,8 @@ interface PersistedSyncState {
   records: MaimemoStudyRecord[]
   requests: number
   totalReported: number
+  /** 全量 as_count 的权威总数，用于计算 missing。 */
+  planTotal?: number
   startedAt: string
 }
 
@@ -74,6 +76,35 @@ function setState(patch: Partial<VocabSyncProgress>): void {
 }
 
 export function getVocabSyncState(): VocabSyncProgress {
+  // 服务重启后内存状态会回到 idle；此时用持久化的上次同步摘要恢复展示。
+  if (state.phase === 'idle') {
+    const last = getLastSyncAt()
+    if (last) {
+      let summary: {
+        unique?: number
+        totalReported?: number
+        requests?: number
+        missing?: number
+      } = {}
+      try {
+        summary = JSON.parse(getSetting('vocabSyncSummary') ?? '{}')
+      } catch {
+        summary = {}
+      }
+      return {
+        ...state,
+        phase: 'done',
+        running: false,
+        message: `上次同步完成：${summary.unique ?? 0} 个词，${summary.requests ?? 0} 次请求，缺失 ${summary.missing ?? 0} 条。`,
+        requests: summary.requests ?? 0,
+        found: summary.unique ?? 0,
+        queue: 0,
+        totalReported: summary.totalReported ?? 0,
+        finishedAt: last,
+        error: null,
+      }
+    }
+  }
   return { ...state }
 }
 
@@ -160,6 +191,7 @@ export async function runVocabSync(options: RunSyncOptions = {}): Promise<VocabS
   const recordMap = new Map(partial.records.map((record) => [record.vocId, record]))
   let requests = partial.requests
   let totalReported = partial.totalReported
+  let planTotal = partial.planTotal
   const processed = new Set(partial.processed)
 
   const emit = (patch: Partial<VocabSyncProgress>) => {
@@ -181,6 +213,26 @@ export async function runVocabSync(options: RunSyncOptions = {}): Promise<VocabS
   })
 
   try {
+    // 断点续传的旧状态可能没有 planTotal；此时用日期窗口的总数补齐。
+    // 注意不要用无日期的 as_count：它包含 next_study_date 为空的 7 条记录。
+    const rootKey = `${MIN_DATE.toISOString()}|${MAX_DATE.toISOString()}`
+    const rootInQueue = partial.queue.some(([s, e]) => `${s}|${e}` === rootKey)
+    if (planTotal === undefined && !rootInQueue) {
+      planTotal = await client.countStudyRecords(MIN_DATE, MAX_DATE)
+      requests += 1
+      partial.planTotal = planTotal
+      partial.requests = requests
+      savePartial(file, partial)
+      emit({
+        phase: 'count',
+        requests,
+        found: recordMap.size,
+        queue: partial.queue.length,
+        totalReported,
+        message: `词库总数 ${planTotal}（日期窗口），继续同步…`,
+      })
+    }
+
     while (partial.queue.length > 0) {
       const [startIso, endIso] = partial.queue.shift() as [string, string]
       const start = new Date(startIso)
@@ -199,6 +251,23 @@ export async function runVocabSync(options: RunSyncOptions = {}): Promise<VocabS
       const count = await client.countStudyRecords(start, end)
       requests += 1
 
+      if (
+        planTotal === undefined &&
+        start.getTime() === MIN_DATE.getTime() &&
+        end.getTime() === MAX_DATE.getTime()
+      ) {
+        planTotal = count
+        partial.planTotal = planTotal
+        emit({
+          phase: 'count',
+          requests,
+          found: recordMap.size,
+          queue: partial.queue.length,
+          totalReported,
+          message: `词库总数 ${planTotal}（日期窗口），开始按时间窗同步…`,
+        })
+      }
+
       if (count === 0) {
         processed.add(key)
         partial.requests = requests
@@ -210,11 +279,17 @@ export async function runVocabSync(options: RunSyncOptions = {}): Promise<VocabS
 
       if (count > MAX_WINDOW) {
         const mid = new Date((start.getTime() + end.getTime()) / 2)
-        partial.queue.push([start.toISOString(), mid.toISOString()])
+        if (mid.getTime() <= start.getTime() || mid.getTime() >= end.getTime()) {
+          throw new AppError('MAIMEMO_ERROR', '时间窗无法继续二分，请检查接口的日期过滤行为。', 502)
+        }
+        // 接口的 start/end 都可能是闭区间；左窗口减去 1ms，避免边界记录被统计两次。
+        const leftEnd = new Date(mid.getTime() - 1)
+        partial.queue.push([start.toISOString(), leftEnd.toISOString()])
         partial.queue.push([mid.toISOString(), end.toISOString()])
         partial.requests = requests
         partial.processed = [...processed]
         partial.records = [...recordMap.values()]
+        if (planTotal !== undefined) partial.planTotal = planTotal
         savePartial(file, partial)
         emit({
           phase: 'count',
@@ -262,14 +337,16 @@ export async function runVocabSync(options: RunSyncOptions = {}): Promise<VocabS
     replaceVocab(toVocabInputs(unique), 'maimemo')
     getRawDb().prepare("DELETE FROM vocab WHERE source <> 'maimemo'").run()
     const finishedAt = new Date().toISOString()
+    const missing = Math.max(0, (planTotal ?? totalReported) - unique.length)
     setSetting('vocabLastSync', finishedAt)
     setSetting(
       'vocabSyncSummary',
       JSON.stringify({
         unique: unique.length,
+        planTotal: planTotal ?? null,
         totalReported,
         requests,
-        missing: Math.max(0, totalReported - unique.length),
+        missing,
         finishedAt,
       }),
     )
@@ -282,7 +359,7 @@ export async function runVocabSync(options: RunSyncOptions = {}): Promise<VocabS
       found: unique.length,
       queue: 0,
       totalReported,
-      message: `同步完成：${unique.length} 个词，${requests} 次请求，缺失 ${Math.max(0, totalReported - unique.length)} 条。`,
+      message: `同步完成：${unique.length} 个词，${requests} 次请求，缺失 ${missing} 条。`,
       finishedAt,
       error: null,
     })

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { resolveLemmaWith, type LemmaDeps } from '@/lib/text/lemma'
 
-const mapping: Record<string, string> = {
+const mapping: Record<string, string> = Object.assign(Object.create(null), {
   running: 'run',
   studies: 'study',
   nurses: 'nurse',
   faster: 'fast',
   bigger: 'big',
-}
+})
 
 const words = new Set([
   'run',
@@ -81,5 +81,14 @@ describe('resolveLemmaWith — inflection only', () => {
   it('returns function words unchanged', () => {
     expect(resolveLemmaWith('as', deps)).toBe('as')
     expect(resolveLemmaWith('this', deps)).toBe('this')
+  })
+
+  it('never resolves Object.prototype keys to functions', () => {
+    // 真实同步时发现：CONTRACTIONS['constructor'] 会返回 Object 构造函数，
+    // 导致 SQLite 绑定函数而报错。
+    expect(resolveLemmaWith('constructor', deps)).toBe('constructor')
+    expect(resolveLemmaWith('toString', deps)).toBe('tostring')
+    expect(resolveLemmaWith('hasOwnProperty', deps)).toBe('hasownproperty')
+    expect(resolveLemmaWith('valueOf', deps)).toBe('valueof')
   })
 })

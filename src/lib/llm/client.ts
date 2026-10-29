@@ -46,6 +46,12 @@ export interface StructuredGenerationOptions<T> {
 }
 
 /**
+ * 推理型模型（如 deepseek-flash）会先消耗 reasoning tokens。
+ * 早先 3000 的上限会让 320 词文章在 reasoning 阶段耗尽预算，最终 content 为空。
+ */
+const DEFAULT_MAX_OUTPUT_TOKENS = 12_000
+
+/**
  * 结构化生成。优先 generateObject（JSON mode，兼容 DeepSeek / OpenAI 兼容接口）；
  * 若供应商不支持 response_format，则退回 generateText + JSON 提取 + Zod 校验。
  */
@@ -63,7 +69,7 @@ export async function generateStructured<T>(
       system: options.system,
       prompt: options.prompt,
       temperature: options.temperature ?? 0.85,
-      maxOutputTokens: options.maxOutputTokens ?? 3000,
+      maxOutputTokens: options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
       maxRetries: 1,
       abortSignal: AbortSignal.timeout(120_000),
       providerOptions: {
@@ -92,7 +98,7 @@ export async function generateStructured<T>(
       system: `${options.system}\n\nIMPORTANT: Return only the JSON object. No prose, no Markdown fences.`,
       prompt: options.prompt,
       temperature: options.temperature ?? 0.85,
-      maxOutputTokens: options.maxOutputTokens ?? 3000,
+      maxOutputTokens: options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
       maxRetries: 1,
       abortSignal: AbortSignal.timeout(120_000),
     })

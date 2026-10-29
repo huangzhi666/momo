@@ -1,4 +1,5 @@
 /* eslint-disable no-console */
+import './load-env'
 import { runVocabSync, type VocabSyncProgress } from '../src/lib/maimemo/sync'
 import { getMaimemoToken } from '../src/lib/env'
 

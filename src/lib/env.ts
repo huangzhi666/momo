@@ -38,6 +38,7 @@ export function demoReason(): string {
   if (process.env.DEMO_MODE === '1' || process.env.DEMO_MODE === 'true') {
     return 'DEMO_MODE 已开启'
   }
+  if (getMaimemoToken()) return '已配置墨墨 Token，Demo 模式关闭'
   return '未配置 MAIMEMO_API_TOKEN'
 }
 

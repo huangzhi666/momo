@@ -70,6 +70,10 @@ export function classifyWord(input: ClassifyInput, deps: ClassifyDeps): Classify
   if (normalized.length === 1 && normalized !== 'a' && normalized !== 'i') {
     return { status: 'ignored', lemma, normalized, knownResponse: null }
   }
+  // a.m / p.m / e.g / i.e 等带点缩写，以及 etc，不属于词汇学习对象。
+  if (/^[a-z]\.[a-z]\.?$/.test(normalized) || normalized === 'etc') {
+    return { status: 'ignored', lemma, normalized, knownResponse: null }
+  }
 
   const functionHit = [...candidates].some((c) => deps.isFunctionWord(c))
   const oxfordHit =
